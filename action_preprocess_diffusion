@@ -80,21 +80,85 @@ else
   force_str=""
 fi
 
-bids_proj_dir=$(realpath "${args[0]}")
+bids_proj_dp=$(realpath "${args[0]}")
 bids_subject="${args[1]}"
 bids_session="${args[2]}"
 
-dwi_dir="${bids_proj_dir}"/sub-"${bids_subject}"/ses-"${bids_session}"/dwi
-fmap_dir="${bids_proj_dir}"/sub-"${bids_subject}"/ses-"${bids_session}"/fmap
-out_dir="${bids_proj_dir}"/derivatives/mrtrix3/sub-"${bids_subject}"/ses-"${bids_session}"/dwi
+if [[ ! -d ${bids_proj_dp} ]]; then
+  die "${RED}ERROR: BIDS project directory ${bids_proj_dp} does not exist, exiting${NOFORMAT}"
+fi
+
+bids_subject_dp="${bids_proj_dp}"/sub-"${bids_subject}"
+if [[ ! -d ${bids_subject_dp} ]]; then
+  die "${RED}ERROR: BIDS subject ${bids_subject} does not exist, exiting${NOFORMAT}"
+fi
+
+bids_session_dp="${bids_subject_dp}"/ses-"${bids_session}"
+if [[ ! -d ${bids_session_dp} ]]; then
+  die "${RED}ERROR: BIDS session ${bids_session} does not exist, exiting${NOFORMAT}"
+fi
+
+dwi_dp="${bids_session_dp}"/dwi
+if [[ ! -d ${dwi_dp} ]]; then
+  die "${RED}ERROR: dwi directory ${dwi_dp} does not exist, exiting${NOFORMAT}"
+fi
+
+dwi_fp_stem="${dwi_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-PA_dwi
+dwi_nii_fp="${dwi_fp_stem}".nii
+if [[ ! -f ${dwi_nii_fp} ]]; then
+  die "${RED}ERROR: dwi NIfTI ${dwi_nii_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+dwi_bval_fp="${dwi_fp_stem}".bval
+if [[ ! -f ${dwi_bval_fp} ]]; then
+  die "${RED}ERROR: dwi bvals ${dwi_bval_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+dwi_bvec_fp="${dwi_fp_stem}".bvec
+if [[ ! -f ${dwi_bvec_fp} ]]; then
+  die "${RED}ERROR: dwi bvecs ${dwi_bvec_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+dwi_json_fp="${dwi_fp_stem}".json
+if [[ ! -f ${dwi_json_fp} ]]; then
+  die "${RED}ERROR: dwi JSON ${dwi_json_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+fmap_dp="${bids_session_dp}"/fmap
+if [[ ! -d ${fmap_dp} ]]; then
+  die "${RED}ERROR: fmap directory ${dwi_dp} does not exist, exiting${NOFORMAT}"
+fi
+
+b0_fp_stem="${fmap_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-AP_epi
+b0_nii_fp="${b0_fp_stem}".nii
+if [[ ! -f ${b0_nii_fp} ]]; then
+  die "${RED}ERROR: b0 NIfTI ${b0_nii_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+b0_bval_fp="${b0_fp_stem}".bval
+if [[ ! -f ${b0_bval_fp} ]]; then
+  die "${RED}ERROR: b0 bvals ${b0_bval_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+b0_bvec_fp="${b0_fp_stem}".bvec
+if [[ ! -f ${b0_bvec_fp} ]]; then
+  die "${RED}ERROR: b0 bvecs ${b0_bvec_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+b0_json_fp="${b0_fp_stem}".json
+if [[ ! -f ${b0_json_fp} ]]; then
+  die "${RED}ERROR: b0 JSON ${b0_json_fp} does not exist, exiting${NOFORMAT}"
+fi
+
+out_dp="${bids_proj_dp}"/derivatives/mrtrix3/sub-"${bids_subject}"/ses-"${bids_session}"/dwi
 
 msg "${GREEN}Step 1. Make a directory to store the results${NOFORMAT}"
-mkdir -p "${out_dir}"
-cd "${out_dir}"
+mkdir -p "${out_dp}"
+cd "${out_dp}"
 
 msg "${GREEN}Step 2. Convert data from NIfTI to mif format using mrconvert${NOFORMAT}"
-mrconvert -coord 3 0 -fslgrad "${fmap_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-AP_epi.bvec "${fmap_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-AP_epi.bval -json_import "${fmap_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-AP_epi.json "${fmap_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-AP_epi.nii b0_AP.mif ${force_str}
-mrconvert -fslgrad "${dwi_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-PA_dwi.bvec "${dwi_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-PA_dwi.bval -json_import "${dwi_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-PA_dwi.json "${dwi_dir}"/sub-"${bids_subject}"_ses-"${bids_session}"_dir-PA_dwi.nii dwi_PA.mif ${force_str}
+mrconvert -coord 3 0 -fslgrad "${b0_bvec_fp}" "${b0_bval_fp}" -json_import "${b0_json_fp}" "${b0_nii_fp}" b0_AP.mif ${force_str}
+mrconvert -fslgrad "${dwi_bvec_fp}" "${dwi_bval_fp}" -json_import "${dwi_json_fp}" "${dwi_nii_fp}" dwi_PA.mif ${force_str}
 
 b0_bvals=$(mrinfo -shell_bvalues b0_AP.mif)
 if [[ ${b0_bvals} -gt 10 ]]; then
