@@ -158,11 +158,10 @@ cd "${out_dp}"
 
 msg "${GREEN}Step 2. Convert data from NIfTI to mif format using mrconvert${NOFORMAT}"
 mrconvert -coord 3 0 -fslgrad "${b0_bvec_fp}" "${b0_bval_fp}" -json_import "${b0_json_fp}" "${b0_nii_fp}" b0_AP.mif ${force_str}
-mrconvert -fslgrad "${dwi_bvec_fp}" "${dwi_bval_fp}" -json_import "${dwi_json_fp}" "${dwi_nii_fp}" dwi_PA.mif ${force_str}
 
 b0_bvals=$(mrinfo -shell_bvalues b0_AP.mif)
 if [[ ${b0_bvals} -gt 10 ]]; then
-  die "${RED}ERROR: b-value of b0_AP.mif is not 0, exiting${NOFORMAT}"
+  die "${RED}ERROR: b-value of b0_AP.mif is ${b0_bvals} not 0, exiting${NOFORMAT}"
 fi
 
 b0_pe_dir=$(mrinfo b0_AP.mif -property PhaseEncodingDirection 2>&1)
@@ -172,14 +171,36 @@ elif [[ ${b0_pe_dir} != "j-" ]]; then
   die "${RED}ERROR: Phase encoding direction of b0_AP.mif is not A>>P, exiting${NOFORMAT}"
 fi
 
-mrview -quiet -mode 2 -load b0_AP.mif -interpolation 0 &
-
-num_bvals=$(mrinfo -shell_sizes dwi_PA.mif | wc -w)
-if [[ "${num_bvals}" -lt 2 ]]; then
-  die "${RED}ERROR: dwi_PA.mif does not include at least 2 b-values, exiting${NOFORMAT}"
+b0_img_size=$(mrinfo -size b0_AP.mif)
+if [[ "${b0_img_size}" != "116 116 81 1" ]]; then
+  msg "${ORANGE}WARNING: b0_AP.mif size is ${b0_img_size} not 116 116 81 1 check the results carefully${NOFORMAT}"
 fi
 
-dwi_PA_b0_val=$(mrinfo -shell_bvalues dwi_PA.mif | cut -d " " -f1)
+b0_img_spacing=$(mrinfo -spacing b0_AP.mif)
+if [[ "${b0_img_spacing}" != "2 2 2 3.5" ]]; then
+  msg "${ORANGE}WARNING: b0_AP.mif voxel sizes are ${b0_img_spacing} not 2 2 2 3.5 check the results carefully${NOFORMAT}"
+fi
+
+mrview -quiet -mode 2 -load b0_AP.mif -interpolation 0 &
+
+mrconvert -fslgrad "${dwi_bvec_fp}" "${dwi_bval_fp}" -json_import "${dwi_json_fp}" "${dwi_nii_fp}" dwi_PA.mif ${force_str}
+
+dwi_shell_sizes=$(mrinfo -shell_sizes dwi_PA.mif)
+if [[ "${dwi_shell_sizes}" != "13 6 48 60 " ]]; then
+  msg "${ORANGE}WARNING: dwi_PA.mif b-value shell sizes are ${dwi_shell_sizes} not 13 6 48 60, check the results carefully${NOFORMAT}"
+fi
+
+dwi_num_bvals=$(echo ${dwi_shell_sizes} | wc -w)
+if [[ "${dwi_num_bvals}" -ne 4 ]]; then
+  die "${RED}ERROR: dwi_PA.mif does not include 4 b-values, exiting${NOFORMAT}"
+fi
+
+dwi_bvals=$(mrinfo -shell_bvalues dwi_PA.mif)
+if [[ "${dwi_bvals}" != "0 500 1000 2000 " ]]; then
+  msg "${ORANGE}WARNING: dwi_PA.mif b-values are ${dwi_bvals} not 0 500 1000 2000, check the results carefully${NOFORMAT}"
+fi
+
+dwi_PA_b0_val=$(echo ${dwi_bvals} | cut -d " " -f1)
 if [[ ${dwi_PA_b0_val} -gt 10 ]]; then
   die "${RED}ERROR: Lowest b-value of dwi_PA.mif is not 0, exiting${NOFORMAT}"
 fi
@@ -189,6 +210,16 @@ if [[ ${dwi_pe_dir} == *'no "PhaseEncodingDirection"'* ]]; then
   msg "${ORANGE}WARNING: Phase encoding direction not found in dwi_PA.mif, check images in mrview${NOFORMAT}"
 elif [[ ${dwi_pe_dir} != "j" ]]; then
   die "${RED}ERROR: Phase encoding direction of dwi_PA.mif is not P>>A, exiting${NOFORMAT}"
+fi
+
+dwi_img_size=$(mrinfo -size dwi_PA.mif)
+if [[ "${dwi_img_size}" != "116 116 81 127" ]]; then
+  die "${ORANGE}WARNING: dwi_PA.mif size is ${dwi_img_size} not 116 116 81 127 check the results carefully${NOFORMAT}"
+fi
+
+dwi_img_spacing=$(mrinfo -spacing dwi_PA.mif)
+if [[ "${dwi_img_spacing}" != "2 2 2 3.5" ]]; then
+  die "${ORANGE}WARNING: dwi_PA.mif voxel sizes are ${dwi_img_spacing} not 2 2 2 3.5 check the results carefully${NOFORMAT}"
 fi
 
 mrview -quiet -mode 2 -load dwi_PA.mif -interpolation 0 &
