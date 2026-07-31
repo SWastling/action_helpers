@@ -152,7 +152,7 @@ fi
 
 out_dp="${bids_proj_dp}"/derivatives/mrtrix3/sub-"${bids_subject}"/ses-"${bids_session}"/dwi
 
-msg "${GREEN}Step 1. Making results directory ${out_dp} ${NOFORMAT}"
+msg "${GREEN}Step 1. Making results directory \"${out_dp}\" ${NOFORMAT}"
 mkdir -p "${out_dp}"
 cd "${out_dp}"
 
