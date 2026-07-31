@@ -152,92 +152,134 @@ fi
 
 out_dp="${bids_proj_dp}"/derivatives/mrtrix3/sub-"${bids_subject}"/ses-"${bids_session}"/dwi
 
-msg "${GREEN}Step 1. Make a directory to store the results${NOFORMAT}"
+msg "${GREEN}Step 1. Making results directory ${out_dp} ${NOFORMAT}"
 mkdir -p "${out_dp}"
 cd "${out_dp}"
 
-msg "${GREEN}Step 2. Convert data from NIfTI to mif format using mrconvert${NOFORMAT}"
+msg "${GREEN}Step 2. Converting data from NIfTI to mif format using mrconvert${NOFORMAT}"
 mrconvert -coord 3 0 -fslgrad "${b0_bvec_fp}" "${b0_bval_fp}" -json_import "${b0_json_fp}" "${b0_nii_fp}" b0_AP.mif ${force_str}
-
-b0_bvals=$(mrinfo -shell_bvalues b0_AP.mif)
-if [[ ${b0_bvals} -gt 10 ]]; then
-  die "${RED}ERROR: b-value of b0_AP.mif is ${b0_bvals} not 0, exiting${NOFORMAT}"
-fi
-
-b0_pe_dir=$(mrinfo b0_AP.mif -property PhaseEncodingDirection 2>&1)
-if [[ ${b0_pe_dir} == *'no "PhaseEncodingDirection"'* ]]; then
-  msg "${ORANGE}WARNING: Phase encoding direction not found in b0_AP.mif, check images in mrview${NOFORMAT}"
-elif [[ ${b0_pe_dir} != "j-" ]]; then
-  die "${RED}ERROR: Phase encoding direction of b0_AP.mif is not A>>P, exiting${NOFORMAT}"
-fi
-
-b0_img_size=$(mrinfo -size b0_AP.mif)
-if [[ "${b0_img_size}" != "116 116 81 1" ]]; then
-  msg "${ORANGE}WARNING: b0_AP.mif size is ${b0_img_size} not 116 116 81 1 check the results carefully${NOFORMAT}"
-fi
-
-b0_img_spacing=$(mrinfo -spacing b0_AP.mif)
-if [[ "${b0_img_spacing}" != "2 2 2 3.5" ]]; then
-  msg "${ORANGE}WARNING: b0_AP.mif voxel sizes are ${b0_img_spacing} not 2 2 2 3.5 check the results carefully${NOFORMAT}"
-fi
-
-mrview -quiet -mode 2 -load b0_AP.mif -interpolation 0 &
-
 mrconvert -fslgrad "${dwi_bvec_fp}" "${dwi_bval_fp}" -json_import "${dwi_json_fp}" "${dwi_nii_fp}" dwi_PA.mif ${force_str}
 
-dwi_shell_sizes=$(mrinfo -shell_sizes dwi_PA.mif)
-if [[ "${dwi_shell_sizes}" != "13 6 48 60 " ]]; then
-  msg "${ORANGE}WARNING: dwi_PA.mif b-value shell sizes are ${dwi_shell_sizes} not 13 6 48 60, check the results carefully${NOFORMAT}"
-fi
+msg "${GREEN}Step 3. Checking acquisition parameters of b0_AP.mif and dwi_PA.mif match the ACTION protocol${NOFORMAT}"
+# Acquisition parameters from ACTION MRI protocol
+declare -A protocol_params_b0_AP
+# parameters accessed via specific option to mrinfo
+protocol_params_b0_AP["matrix_size"]="116 116 81 1"
+protocol_params_b0_AP["voxel_size"]="2 2 2 3.5"
+protocol_params_b0_AP["shell_sizes"]="1"
+protocol_params_b0_AP["shell_bvalues"]="0"
+# parameters accessed via -property option to mrinfo
+protocol_params_b0_AP["BandwidthPerPixelPhaseEncode"]="15.674"
+protocol_params_b0_AP["CoilCombinationMethod"]="Adaptive Combine"
+protocol_params_b0_AP["DiffusionScheme"]="Monopolar"
+protocol_params_b0_AP["DwellTime"]="1.9e-06"
+protocol_params_b0_AP["EchoTime"]="0.071"
+protocol_params_b0_AP["EchoTrainLength"]="87"
+protocol_params_b0_AP["EffectiveEchoSpacing"]="0.000549999"
+protocol_params_b0_AP["FlipAngle"]="90"
+protocol_params_b0_AP["InPlanePhaseEncodingDirectionDICOM"]="COL"
+protocol_params_b0_AP["MRAcquisitionType"]="2D"
+protocol_params_b0_AP["MTState"]="false"
+protocol_params_b0_AP["MagneticFieldStrength"]="3"
+protocol_params_b0_AP["Manufacturer"]="Siemens"
+protocol_params_b0_AP["ManufacturersModelName"]="MAGNETOM Prisma"
+protocol_params_b0_AP["MultibandAccelerationFactor"]="3"
+protocol_params_b0_AP["NonlinearGradientCorrection"]="false"
+protocol_params_b0_AP["ParallelAcquisitionTechnique"]="SMS"
+protocol_params_b0_AP["PartialFourier"]="0.75"
+protocol_params_b0_AP["PartialFourierDirection"]="PHASE"
+protocol_params_b0_AP["PatientPosition"]="HFS"
+protocol_params_b0_AP["PercentPhaseFOV"]="100"
+protocol_params_b0_AP["PercentSampling"]="100"
+protocol_params_b0_AP["PhaseEncodingDirection"]="j-"
+protocol_params_b0_AP["PhaseResolution"]="1"
+protocol_params_b0_AP["PixelBandwidth"]="2269"
+protocol_params_b0_AP["ProtocolName"]="ep2d_diff_tra_s3_AP"
+protocol_params_b0_AP["ReceiveCoilActiveElements"]="HEA;HEP"
+protocol_params_b0_AP["ReceiveCoilName"]="Head_32"
+protocol_params_b0_AP["RefLinesPE"]="14"
+protocol_params_b0_AP["RepetitionTime"]="3.5"
+protocol_params_b0_AP["ScanningSequence"]="EP"
+protocol_params_b0_AP["SeriesDescription"]="ep2d_diff_tra_s3_AP"
+protocol_params_b0_AP["SliceEncodingDirection"]="k"
+protocol_params_b0_AP["SliceThickness"]="2"
+protocol_params_b0_AP["SoftwareVersions"]="syngo MR XA60"
+protocol_params_b0_AP["StudyDescription"]="E252883"
+protocol_params_b0_AP["TotalReadoutTime"]="0.0632"
 
-dwi_num_bvals=$(echo ${dwi_shell_sizes} | wc -w)
-if [[ "${dwi_num_bvals}" -ne 4 ]]; then
-  die "${RED}ERROR: dwi_PA.mif does not include 4 b-values, exiting${NOFORMAT}"
-fi
+declare -A protocol_params_dwi_PA
+# copy associative array
+for key in "${!protocol_params_b0_AP[@]}"; do
+    protocol_params_dwi_PA[$key]=${protocol_params_b0_AP[$key]}
+done
+#update some of the values
+protocol_params_dwi_PA["matrix_size"]="116 116 81 127"
+protocol_params_dwi_PA["shell_sizes"]="13 6 48 60"
+protocol_params_dwi_PA["shell_bvalues"]="0 500 1000 2000"
+protocol_params_dwi_PA["PhaseEncodingDirection"]="j"
+protocol_params_dwi_PA["ProtocolName"]="ep2d_diff_tra_s3_PA"
+protocol_params_dwi_PA["SeriesDescription"]="ep2d_diff_tra_s3_PA"
 
-dwi_bvals=$(mrinfo -shell_bvalues dwi_PA.mif)
-if [[ "${dwi_bvals}" != "0 500 1000 2000 " ]]; then
-  msg "${ORANGE}WARNING: dwi_PA.mif b-values are ${dwi_bvals} not 0 500 1000 2000, check the results carefully${NOFORMAT}"
-fi
+msg "${GREEN}Step 3.a. for b0_AP.mif${NOFORMAT}"
+for param in "${!protocol_params_b0_AP[@]}"; do
+  if [[ ${param} == "matrix_size" ]]; then
+    # command to trim trailing and leading white-space is: sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+    acquired_param_val=$(mrinfo -size b0_AP.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "voxel_size" ]]; then
+    acquired_param_val=$(mrinfo -spacing b0_AP.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "shell_sizes" ]]; then
+    acquired_param_val=$(mrinfo -shell_sizes b0_AP.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "shell_bvalues" ]]; then
+    acquired_param_val=$(mrinfo -shell_bvalues b0_AP.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  else
+    acquired_param_val=$(mrinfo -property "${param}" b0_AP.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  fi
 
-dwi_PA_b0_val=$(echo ${dwi_bvals} | cut -d " " -f1)
-if [[ ${dwi_PA_b0_val} -gt 10 ]]; then
-  die "${RED}ERROR: Lowest b-value of dwi_PA.mif is not 0, exiting${NOFORMAT}"
-fi
+  if [[ ${acquired_param_val} == "${protocol_params_b0_AP["${param}"]}" ]]; then
+    msg "${GREEN}* ${param} of b0_AP.mif is \"${acquired_param_val}\" as per ACTION protocol${NOFORMAT}"
+  else
+    msg "${ORANGE}* WARNING: ${param} of b0_AP.mif is \"${acquired_param_val}\" not \"${protocol_params_b0_AP[${param}]}\" as expected from ACTION protocol${NOFORMAT}"
+  fi
+done
 
-dwi_pe_dir=$(mrinfo dwi_PA.mif -property PhaseEncodingDirection 2>&1)
-if [[ ${dwi_pe_dir} == *'no "PhaseEncodingDirection"'* ]]; then
-  msg "${ORANGE}WARNING: Phase encoding direction not found in dwi_PA.mif, check images in mrview${NOFORMAT}"
-elif [[ ${dwi_pe_dir} != "j" ]]; then
-  die "${RED}ERROR: Phase encoding direction of dwi_PA.mif is not P>>A, exiting${NOFORMAT}"
-fi
+msg "${GREEN}Step 3.b. for dwi_PA.mif${NOFORMAT}"
+for param in "${!protocol_params_dwi_PA[@]}"; do
+  if [[ ${param} == "matrix_size" ]]; then
+    acquired_param_val=$(mrinfo -size dwi_PA.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "voxel_size" ]]; then
+    acquired_param_val=$(mrinfo -spacing dwi_PA.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "shell_sizes" ]]; then
+    acquired_param_val=$(mrinfo -shell_sizes dwi_PA.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  elif [[ ${param} == "shell_bvalues" ]]; then
+    acquired_param_val=$(mrinfo -shell_bvalues dwi_PA.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  else
+    acquired_param_val=$(mrinfo -property "${param}" dwi_PA.mif | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  fi
 
-dwi_img_size=$(mrinfo -size dwi_PA.mif)
-if [[ "${dwi_img_size}" != "116 116 81 127" ]]; then
-  die "${ORANGE}WARNING: dwi_PA.mif size is ${dwi_img_size} not 116 116 81 127 check the results carefully${NOFORMAT}"
-fi
+  if [[ ${acquired_param_val} == "${protocol_params_dwi_PA["${param}"]}" ]]; then
+    msg "${GREEN}* ${param} of dwi_PA.mif is \"${acquired_param_val}\" as per ACTION protocol${NOFORMAT}"
+  else
+    msg "${ORANGE}* WARNING: ${param} of dwi_PA.mif is \"${acquired_param_val}\" not \"${protocol_params_dwi_PA[${param}]}\" as expected from ACTION protocol${NOFORMAT}"
+  fi
+done
 
-dwi_img_spacing=$(mrinfo -spacing dwi_PA.mif)
-if [[ "${dwi_img_spacing}" != "2 2 2 3.5" ]]; then
-  die "${ORANGE}WARNING: dwi_PA.mif voxel sizes are ${dwi_img_spacing} not 2 2 2 3.5 check the results carefully${NOFORMAT}"
-fi
-
+mrview -quiet -mode 2 -load b0_AP.mif -interpolation 0 &
 mrview -quiet -mode 2 -load dwi_PA.mif -interpolation 0 &
 
-msg "${GREEN}Step 3. Concatenate the P>>A and A>>P data using mrcat${NOFORMAT}"
+msg "${GREEN}Step 4. Concatenating the P>>A and A>>P data using mrcat${NOFORMAT}"
 mrcat dwi_PA.mif b0_AP.mif dwi.mif ${force_str}
 
-msg "${GREEN}Step 4. Denoise the data using dwidenoise${NOFORMAT}"
+msg "${GREEN}Step 5. Denoising the data using dwidenoise${NOFORMAT}"
 dwidenoise dwi.mif dwi_denoise.mif ${force_str}
 mrcalc dwi.mif dwi_denoise.mif -subtract dwi_denoise_res.mif ${force_str}
 mrview -quiet -mode 2 -load dwi_denoise_res.mif -interpolation 0 -load dwi.mif  -interpolation 0 -load dwi_denoise.mif -interpolation 0 &
 
-msg "${GREEN}Step 5. Remove the Gibbs ringing artefact with mrdegibbs${NOFORMAT}"
+msg "${GREEN}Step 6. Removing the Gibbs ringing artefact with mrdegibbs${NOFORMAT}"
 mrdegibbs dwi_denoise.mif dwi_degibbs.mif ${force_str}
 mrcalc dwi_denoise.mif dwi_degibbs.mif -subtract dwi_degibbs_res.mif ${force_str}
 mrview -quiet -mode 2 -load dwi_degibbs_res.mif -interpolation 0 -load dwi_denoise.mif  -interpolation 0 -load dwi_degibbs.mif -interpolation 0 &
 
-msg "${GREEN}Step 6. Correct for susceptibility and eddy current induced distortions and subject movements with FSL topup and eddy using dwifslpreproc${NOFORMAT}"
+msg "${GREEN}Step 7. Correcting for susceptibility and eddy current induced distortions and subject movements with FSL topup and eddy using dwifslpreproc${NOFORMAT}"
 dwiextract -bzero dwi_degibbs.mif b0_degibbs.mif ${force_str}
 b0_vols=$(mrinfo -shell_sizes b0_degibbs.mif)
 mrconvert b0_degibbs.mif -coord 3 $((b0_vols-2)):$((b0_vols-1)) b0_degibbs_PA_AP.mif ${force_str}
@@ -247,26 +289,27 @@ dwi_PA_vols=$(mrinfo -size dwi_PA.mif | cut -d " " -f 4)
 mrconvert dwi_degibbs.mif -coord 3 0:$((dwi_PA_vols-1)) dwi_degibbs_PA.mif ${force_str}
 
 dwifslpreproc ${force_str} dwi_degibbs_PA.mif dwi_tu_eddy.mif -align_seepi -rpe_header -se_epi b0_degibbs_PA_AP.mif -eddyqc_all eddy_qc_results -nocleanup -eddy_options "--slm=linear --data_is_shelled --repol --cnr_maps"
+rm dwifslpreproc-tmp-*
 
 mrview -quiet -mode 2 -load dwi_degibbs.mif -interpolation 0 -load dwi_tu_eddy.mif -interpolation 0 &
 
-msg "${GREEN}Step 7. Estimate the response functions of white matter (WM), grey matter (GM) and cerebro-spinal fluid (CSF) for spherical deconvolution using dwi2response${NOFORMAT}"
+msg "${GREEN}Step 8. Estimating the response functions of white matter (WM), grey matter (GM) and cerebro-spinal fluid (CSF) for spherical deconvolution using dwi2response${NOFORMAT}"
 dwi2response dhollander dwi_tu_eddy.mif response_wm.txt response_gm.txt response_csf.txt -voxels response_voxels.mif ${force_str}
 mrview -quiet -mode 2 -load dwi_tu_eddy.mif -interpolation 0 -overlay.load response_voxels.mif -overlay.interpolation 0 &
 shview response_wm.txt &
 shview response_gm.txt &
 shview response_csf.txt &
 
-msg "${GREEN}Step 8. Create a brain mask with SynthStrip${NOFORMAT}"
+msg "${GREEN}Step 9. Creating a brain mask with SynthStrip${NOFORMAT}"
 dwiextract -bzero dwi_tu_eddy.mif - | mrconvert - -coord 3 0 b0_tu_eddy.nii ${force_str}
 mri_synthstrip -i b0_tu_eddy.nii -m b0_tu_eddy_mask.nii.gz
 mrconvert b0_tu_eddy_mask.nii.gz b0_tu_eddy_mask.mif ${force_str}
 mrview -quiet -mode 2 -load b0_tu_eddy.nii -interpolation 0 -roi.load b0_tu_eddy_mask.mif -roi.opacity 0.6 &
 
-msg "${GREEN}Step 9. Estimate the diffusion tensor with dwi2tensor${NOFORMAT}"
+msg "${GREEN}Step 10. Estimating the diffusion tensor with dwi2tensor${NOFORMAT}"
 dwi2tensor -mask b0_tu_eddy_mask.mif dwi_tu_eddy.mif dt.mif ${force_str}
 
-msg "${GREEN}Step 10. Calculate the fractional anisotropy (FA) and first eigenvector (EV) maps with tensor2metric${NOFORMAT}"
+msg "${GREEN}Step 11. Calculating the fractional anisotropy (FA) and first eigenvector (EV) maps with tensor2metric${NOFORMAT}"
 tensor2metric -mask b0_tu_eddy_mask.mif -fa fa.mif -vector ev.mif dt.mif ${force_str}
 mrview -quiet -mode 2 -load fa.mif -interpolation 0 -load ev.mif -interpolation 0 -odf.load_tensor dt.mif &
 
