@@ -4,3 +4,6 @@
 # Pycharm project
 .idea/
 
+# Python
+__pycache__/
+
