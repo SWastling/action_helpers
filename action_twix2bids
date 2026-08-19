@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+
+# Wrapper script to convert raw MRS data (.dat) from a Siemens MR system MRS export using the twix tool to the
+# NIfTI-MRS format using spec2nii, organise the resulting files according to BIDS and then run Osprey
+# Based on template from https://betterdev.blog/minimal-safe-bash-script-template/
+
+set -Eeuo pipefail
+trap cleanup SIGINT SIGTERM ERR EXIT
+
+usage() {
+  cat <<EOF
+Usage: $(basename "${BASH_SOURCE[0]}") [-h] [--no-color] [-f] t b sub ses
+
+Convert Siemens MRS twix data to NIfTI-MRS and organise according to BIDS and then run Osprey
+
+Positional arguments:
+t               twix data directory
+b               BIDS project directory
+sub             BIDS subject
+ses             BIDS session
+
+Optional arguments:
+-h, --help      print help and exit
+--no-color      don't colorize terminal output
+
+EOF
+  exit
+}
+
+cleanup() {
+  trap - SIGINT SIGTERM ERR EXIT
+}
+
+setup_colors() {
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE=''
+  fi
+}
+
+msg() {
+  echo >&2 -e "${1-}"
+}
+
+die() {
+  local msg=$1
+  local code=${2-1} # default exit status 1
+  msg "$msg"
+  exit "$code"
+}
+
+parse_params() {
+  while :; do
+    case "${1-}" in
+    -h | --help) usage ;;
+    --no-color) NO_COLOR=1 ;;
+    -?*) die "Unknown option: $1" ;;
+    *) break ;;
+    esac
+    shift
+  done
+
+  args=("$@")
+
+  # check required params and arguments
+  [[ ${#args[@]} -ne 4 ]] && usage
+
+  return 0
+}
+
+parse_params "$@"
+setup_colors
+
+if ! command -v spec2nii &> /dev/null; then
+  die "${RED}ERROR: spec2nii not found, exiting${NOFORMAT}"
+fi
+
+twix_dp=$(realpath "${args[0]}")
+bids_proj_dp=$(realpath "${args[1]}")
+bids_subject="${args[2]}"
+bids_session="${args[3]}"
+
+if [[ ! -d "${twix_dp}" ]]; then
+  die "${RED}ERROR: twix data directory \"${twix_dp}\" does not exist, exiting${NOFORMAT}"
+fi
+
+# Enable nullglob so unmatched patterns expand to nothing
+shopt -s nullglob
+
+# Create an array of twix data filepaths
+twix_fps=("${twix_dp}"/*.dat)
+
+# exit if array of twix data filepaths is empty
+if [ ${#twix_fps[@]} -eq 0 ]; then
+    die "${RED}ERROR: no \".dat\" files found in \"${twix_dp}\", exiting"
+fi
+
+bids_subject_dp="${bids_proj_dp}"/sub-"${bids_subject}"
+bids_session_dp="${bids_subject_dp}"/ses-"${bids_session}"
+mrs_dp="${bids_session_dp}"/mrs
+
+msg "${GREEN}making directory \"${mrs_dp}\" ${NOFORMAT}"
+mkdir -p "${mrs_dp}"
+
+derivatives_dp="${bids_proj_dp}"/derivatives/osprey/sub-"${bids_subject}"/ses-"${bids_session}"/mrs
+msg "${GREEN}making directory \"${derivatives_dp}\" ${NOFORMAT}"
+mkdir -p "${derivatives_dp}"
+
+msg "${GREEN}converting the ${#twix_fps[@]} twix files found in \"${twix_dp}\" with spec2nii:${NOFORMAT}"
+for twix_fp in "${twix_fps[@]}"
+do
+  # extract filename from filepath
+  twix_fn="${twix_fp##*/}"
+  msg "${GREEN}* ${twix_fn} ${NOFORMAT}"
+
+  # remove file extension from filename
+  twix_fn_wo_ext="${twix_fn%.*}"
+
+  if [[ ${twix_fn_wo_ext} == *"unsuppressed" ]]; then
+    mrs_type="msref"
+    # remove the text after the final _ in filename i.e. the word unsuppressed
+    twix_fn_wo_ext_wo_unsuppressed="${twix_fn_wo_ext%_*}"
+    #cut out the name of the VOI i.e. fields 5 to the end
+    voi_name=$(echo "${twix_fn_wo_ext_wo_unsuppressed}" | cut -d "_" -f 5-)
+  else
+    mrs_type="svs"
+    #cut out the name of the VOI i.e. fields 5 to the end
+    voi_name=$(echo "${twix_fn_wo_ext}" | cut -d "_" -f 5-)
+  fi
+
+  out_fp="${mrs_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_voi-"${voi_name}"_"${mrs_type}"
+  spec2nii twix -j -f "${out_fp}" --anon -e image "${twix_fp}"
+done
+
+
+# Create an array of NIfTI-MRS data filepaths
+nii_svs_fps=("${mrs_dp}"/*_svs.nii.gz)
+
+# exit if array of NIfTI data filepaths is empty
+if [ ${#nii_svs_fps[@]} -eq 0 ]; then
+    die "${RED}ERROR: no \".nii.gz\" files found in \"${mrs_dp}\", exiting"
+fi
+
+msg "${GREEN}creating Osprey job and stats files for the ${#nii_svs_fps[@]} SVS NIfTI-MRS files found in \"${mrs_dp}\" ${NOFORMAT}"
+
+
+t1w_fp="${bids_session_dp}"/anat/sub-"${bids_subject}"_ses-"${bids_session}"_T1w.nii
+if [[ ! -f "${t1w_fp}" ]];
+then
+  die "${RED}ERROR: T1w NIfTI file \"${t1w_fp##*/}\" not found in \"${bids_session_dp}/anat\", no Osprey job file will be created${NOFORMAT} "
+fi
+
+svs_fps_list=""
+msref_fps_list=""
+# even though it's the same T1w file, need to create a list with the same filepath repeated
+t1w_fps_list=""
+
+osprey_stats_fp="${derivatives_dp}"/stats.csv
+
+echo "group" > "${osprey_stats_fp}"
+
+nii_svs_cnt=1
+for nii_svs_fp in "${nii_svs_fps[@]}"
+do
+  svs_fps_list="${svs_fps_list}""'${nii_svs_fp}'",
+
+  # note %% to remove both nii and gz
+  nii_svs_fp_wo_ext="${nii_svs_fp%%.*}"
+
+  nii_msref_fp="${nii_svs_fp_wo_ext%_*}"_msref.nii.gz
+  if [[ ! -f "${nii_msref_fp}" ]];
+  then
+    msg "${ORANGE}WARNING: accompanying water reference file \"${nii_msref_fp##*/}\" not found in \"${mrs_dp}\" ${NOFORMAT} no Osprey job file will be created for this SVS file"
+    continue
+  fi
+
+  msref_fps_list="${msref_fps_list}""'${nii_msref_fp}'",
+  t1w_fps_list="${t1w_fps_list}""'${t1w_fp}'",
+
+  echo "$((nii_svs_cnt++))" >> "${osprey_stats_fp}"
+
+done
+
+osprey_job_fp="${derivatives_dp}"/jobfile.m
+
+cat << EOF > "${osprey_job_fp}"
+seqType = 'unedited';
+editTarget = {'none'};
+dataScenario = 'invivo';
+opts.SpecReg = 'RobSpecReg';
+opts.SubSpecAlignment.mets = 'L2Norm';
+opts.ECC.raw = 1;
+opts.ECC.mm = 1;
+opts.saveLCM = 0;
+opts.savejMRUI = 0;
+opts.saveVendor = 0;
+opts.saveNII = 0;
+opts.savePDF = 1;
+opts.fit.includeMetabs = {'default'};
+opts.fit.method = 'Osprey';
+opts.fit.style = 'Separate';
+opts.fit.range = [0.5 4];
+opts.fit.rangeWater  = [2.0 7.4];
+opts.fit.bLineKnotSpace = 0.4;
+opts.fit.fitMM = 1;
+files = {${svs_fps_list}};
+files_ref = {${msref_fps_list}};
+files_nii  = {${t1w_fps_list}};
+file_stat = '${osprey_stats_fp}';
+outputFolder = '${derivatives_dp}';
+EOF
+
+if ! command -v matlab &> /dev/null; then
+  die "${RED}ERROR: matlab not found, exiting${NOFORMAT}"
+fi
+
+msg "${GREEN}running Osprey job file in MATLAB${NOFORMAT}"
+matlab -nodesktop -nosplash -r "RunOspreyJob('${osprey_job_fp}')"
