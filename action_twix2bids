@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Wrapper script to convert raw MRS data (.dat) from a Siemens MR system MRS export using the twix tool to the
-# NIfTI-MRS format using spec2nii, organise the resulting files according to BIDS and then run Osprey
+# NIfTI-MRS format using spec2nii, organise the resulting files according to BIDS
 # Based on template from https://betterdev.blog/minimal-safe-bash-script-template/
 
 set -Eeuo pipefail
@@ -11,7 +11,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "${BASH_SOURCE[0]}") [-h] [--no-color] [-f] t b sub ses
 
-Convert Siemens MRS twix data to NIfTI-MRS and organise according to BIDS and then run Osprey
+Convert Siemens MRS twix data to NIfTI-MRS and organise according to BIDS
 
 Positional arguments:
 t               twix data directory
@@ -132,88 +132,3 @@ do
   out_fp="${mrs_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_voi-"${voi_name}"_"${mrs_type}"
   spec2nii twix -j -f "${out_fp}" --anon -e image "${twix_fp}"
 done
-
-
-# Create an array of NIfTI-MRS data filepaths
-nii_svs_fps=("${mrs_dp}"/*_svs.nii.gz)
-
-# exit if array of NIfTI data filepaths is empty
-if [ ${#nii_svs_fps[@]} -eq 0 ]; then
-    die "${RED}ERROR: no \".nii.gz\" files found in \"${mrs_dp}\", exiting"
-fi
-
-msg "${GREEN}creating Osprey job and stats files for the ${#nii_svs_fps[@]} SVS NIfTI-MRS files found in \"${mrs_dp}\" ${NOFORMAT}"
-
-
-t1w_fp="${bids_session_dp}"/anat/sub-"${bids_subject}"_ses-"${bids_session}"_T1w.nii
-if [[ ! -f "${t1w_fp}" ]];
-then
-  die "${RED}ERROR: T1w NIfTI file \"${t1w_fp##*/}\" not found in \"${bids_session_dp}/anat\", no Osprey job file will be created${NOFORMAT} "
-fi
-
-svs_fps_list=""
-msref_fps_list=""
-# even though it's the same T1w file, need to create a list with the same filepath repeated
-t1w_fps_list=""
-
-osprey_stats_fp="${derivatives_dp}"/stats.csv
-
-echo "group" > "${osprey_stats_fp}"
-
-nii_svs_cnt=1
-for nii_svs_fp in "${nii_svs_fps[@]}"
-do
-  svs_fps_list="${svs_fps_list}""'${nii_svs_fp}'",
-
-  # note %% to remove both nii and gz
-  nii_svs_fp_wo_ext="${nii_svs_fp%%.*}"
-
-  nii_msref_fp="${nii_svs_fp_wo_ext%_*}"_msref.nii.gz
-  if [[ ! -f "${nii_msref_fp}" ]];
-  then
-    msg "${ORANGE}WARNING: accompanying water reference file \"${nii_msref_fp##*/}\" not found in \"${mrs_dp}\" ${NOFORMAT} no Osprey job file will be created for this SVS file"
-    continue
-  fi
-
-  msref_fps_list="${msref_fps_list}""'${nii_msref_fp}'",
-  t1w_fps_list="${t1w_fps_list}""'${t1w_fp}'",
-
-  echo "$((nii_svs_cnt++))" >> "${osprey_stats_fp}"
-
-done
-
-osprey_job_fp="${derivatives_dp}"/jobfile.m
-
-cat << EOF > "${osprey_job_fp}"
-seqType = 'unedited';
-editTarget = {'none'};
-dataScenario = 'invivo';
-opts.SpecReg = 'RobSpecReg';
-opts.SubSpecAlignment.mets = 'L2Norm';
-opts.ECC.raw = 1;
-opts.ECC.mm = 1;
-opts.saveLCM = 0;
-opts.savejMRUI = 0;
-opts.saveVendor = 0;
-opts.saveNII = 0;
-opts.savePDF = 1;
-opts.fit.includeMetabs = {'default'};
-opts.fit.method = 'Osprey';
-opts.fit.style = 'Separate';
-opts.fit.range = [0.5 4];
-opts.fit.rangeWater  = [2.0 7.4];
-opts.fit.bLineKnotSpace = 0.4;
-opts.fit.fitMM = 1;
-files = {${svs_fps_list}};
-files_ref = {${msref_fps_list}};
-files_nii  = {${t1w_fps_list}};
-file_stat = '${osprey_stats_fp}';
-outputFolder = '${derivatives_dp}';
-EOF
-
-if ! command -v matlab &> /dev/null; then
-  die "${RED}ERROR: matlab not found, exiting${NOFORMAT}"
-fi
-
-msg "${GREEN}running Osprey job file in MATLAB${NOFORMAT}"
-matlab -nodesktop -nosplash -r "RunOspreyJob('${osprey_job_fp}')"
