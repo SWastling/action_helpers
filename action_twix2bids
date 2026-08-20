@@ -116,7 +116,7 @@ do
   # parse the name of the voxel from the TWIX filename i.e. from meas_MIDXXXXX_FIDYYYYY_voxelname
   # and set the suffix of the BIDS filename
   if [[ ${twix_fn_wo_ext} == *"_unsuppressed" ]]; then
-    suffix="msref"
+    suffix="mrsref"
     # remove the word _unsuppressed from the name
     twix_fn_wo_ext_wo_unsuppressed="${twix_fn_wo_ext/_unsuppressed/}"
 
