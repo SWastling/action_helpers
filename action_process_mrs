@@ -117,10 +117,10 @@ do
 
   msg "${GREEN}* ${nii_svs_fn} ${NOFORMAT}"
 
-  nii_msref_fp="${nii_svs_fp/_svs.nii.gz/_msref.nii.gz}"
-  if [[ ! -f "${nii_msref_fp}" ]];
+  nii_mrsref_fp="${nii_svs_fp/_svs.nii.gz/_mrsref.nii.gz}"
+  if [[ ! -f "${nii_mrsref_fp}" ]];
   then
-    msg "${ORANGE}WARNING: accompanying water reference file \"${nii_msref_fp##*/}\" not found in \"${mrs_dp}\" ${NOFORMAT} no Osprey job file will be created for this SVS file"
+    msg "${ORANGE}WARNING: accompanying water reference file \"${nii_mrsref_fp##*/}\" not found in \"${mrs_dp}\" ${NOFORMAT} no Osprey job file will be created for this SVS file"
     continue
   fi
 
