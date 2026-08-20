@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+
+# Wrapper script to process NIfTI-MRS data using Osprey
+# Based on template from https://betterdev.blog/minimal-safe-bash-script-template/
+
+set -Eeuo pipefail
+trap cleanup SIGINT SIGTERM ERR EXIT
+
+usage() {
+  cat <<EOF
+Usage: $(basename "${BASH_SOURCE[0]}") [-h] [--no-color] [-f] b sub ses
+
+process NIfTI-MRS data using Osprey
+
+Positional arguments:
+b               BIDS project directory
+sub             BIDS subject
+ses             BIDS session
+
+Optional arguments:
+-h, --help      print help and exit
+--no-color      don't colorize terminal output
+
+EOF
+  exit
+}
+
+cleanup() {
+  trap - SIGINT SIGTERM ERR EXIT
+}
+
+setup_colors() {
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE=''
+  fi
+}
+
+msg() {
+  echo >&2 -e "${1-}"
+}
+
+die() {
+  local msg=$1
+  local code=${2-1} # default exit status 1
+  msg "$msg"
+  exit "$code"
+}
+
+parse_params() {
+  while :; do
+    case "${1-}" in
+    -h | --help) usage ;;
+    --no-color) NO_COLOR=1 ;;
+    -?*) die "Unknown option: $1" ;;
+    *) break ;;
+    esac
+    shift
+  done
+
+  args=("$@")
+
+  # check required params and arguments
+  [[ ${#args[@]} -ne 3 ]] && usage
+
+  return 0
+}
+
+parse_params "$@"
+setup_colors
+
+bids_proj_dp=$(realpath "${args[0]}")
+bids_subject="${args[1]}"
+bids_session="${args[2]}"
+
+if ! command -v matlab &> /dev/null; then
+  die "${RED}ERROR: matlab not found, exiting${NOFORMAT}"
+fi
+
+# Enable nullglob so unmatched patterns expand to nothing
+shopt -s nullglob
+
+bids_subject_dp="${bids_proj_dp}"/sub-"${bids_subject}"
+bids_session_dp="${bids_subject_dp}"/ses-"${bids_session}"
+mrs_dp="${bids_session_dp}"/mrs
+
+if [[ ! -d "${mrs_dp}" ]]; then
+  die "${RED}ERROR: MRS data directory \"${mrs_dp}\" does not exist, exiting${NOFORMAT}"
+fi
+
+derivatives_dp="${bids_proj_dp}"/derivatives/osprey/sub-"${bids_subject}"/ses-"${bids_session}"/mrs
+msg "${GREEN}making directory \"${derivatives_dp}\" ${NOFORMAT}"
+mkdir -p "${derivatives_dp}"
+
+# Create an array of NIfTI-MRS data filepaths
+nii_svs_fps=("${mrs_dp}"/*_svs.nii.gz)
+
+# exit if array of NIfTI data filepaths is empty
+if [ ${#nii_svs_fps[@]} -eq 0 ]; then
+    die "${RED}ERROR: no \".nii.gz\" files found in \"${mrs_dp}\", exiting"
+fi
+
+msg "${GREEN}creating Osprey job files for the ${#nii_svs_fps[@]} SVS NIfTI-MRS files found in \"${mrs_dp}\" ${NOFORMAT}"
+
+t1w_fp="${bids_session_dp}"/anat/sub-"${bids_subject}"_ses-"${bids_session}"_T1w.nii
+if [[ ! -f "${t1w_fp}" ]];
+then
+  die "${RED}ERROR: T1w NIfTI file \"${t1w_fp##*/}\" not found in \"${bids_session_dp}/anat\", exiting${NOFORMAT} "
+fi
+
+for nii_svs_fp in "${nii_svs_fps[@]}"
+do
+
+  #filename only
+  nii_svs_fn="${nii_svs_fp##*/}"
+
+  msg "${GREEN}* ${nii_svs_fn} ${NOFORMAT}"
+
+  nii_msref_fp="${nii_svs_fp/_svs.nii.gz/_msref.nii.gz}"
+  if [[ ! -f "${nii_msref_fp}" ]];
+  then
+    msg "${ORANGE}WARNING: accompanying water reference file \"${nii_msref_fp##*/}\" not found in \"${mrs_dp}\" ${NOFORMAT} no Osprey job file will be created for this SVS file"
+    continue
+  fi
+
+  #filename with .nii.gz extension removed e.g. sub-110001_ses-week1_voi-ACC_svs
+  nii_svs_fn_wo_ext="${nii_svs_fn/.nii.gz/}"
+
+  # find the name of the VOI by cutting the filename into parts separated by - and select the fourth field
+  # i.e. ACC_svs then cutting using _ and select first field i.e ACC
+  voi_name=$(echo "${nii_svs_fn_wo_ext}" | cut -d "-" -f 4 | cut -d "_" -f 1)
+
+  voi_dp="${derivatives_dp}"/"${voi_name}"
+  msg "${GREEN}** making directory \"${voi_dp}\" ${NOFORMAT}"
+  mkdir -p "${voi_dp}"
+
+  osprey_job_fp="${voi_dp}"/jobfile.m
+  msg "${GREEN}** making Osprey job file \"${osprey_job_fp}\" ${NOFORMAT}"
+
+  cat << EOF > "${osprey_job_fp}"
+seqType = 'unedited';
+editTarget = {'none'};
+dataScenario = 'invivo';
+opts.SpecReg = 'RobSpecReg';
+opts.SubSpecAlignment.mets = 'L2Norm';
+opts.ECC.raw = 1;
+opts.ECC.mm = 1;
+opts.saveLCM = 0;
+opts.savejMRUI = 0;
+opts.saveVendor = 0;
+opts.saveNII = 0;
+opts.savePDF = 1;
+opts.fit.includeMetabs = {'default'};
+opts.fit.method = 'Osprey';
+opts.fit.style = 'Separate';
+opts.fit.range = [0.5 4];
+opts.fit.rangeWater  = [2.0 7.4];
+opts.fit.bLineKnotSpace = 0.4;
+opts.fit.fitMM = 1;
+files = {'${nii_svs_fp}'};
+files_ref = {'${nii_msref_fp}'};
+files_nii  = {'${t1w_fp}'};
+file_stat = '';
+outputFolder = '${voi_dp}';
+EOF
+
+  msg "${GREEN}** running Osprey job file in MATLAB${NOFORMAT}"
+  matlab -nodesktop -nosplash -r "MRSCont = OspreyJob('${osprey_job_fp}'); MRSCont = OspreyLoad(MRSCont); MRSCont = OspreyProcess(MRSCont); MRSCont = OspreyFit(MRSCont); MRSCont = OspreyCoreg(MRSCont); MRSCont = OspreySeg(MRSCont); MRSCont = OspreyQuantify(MRSCont); exit"
+
+done
+
+
+
+
+
+
+
