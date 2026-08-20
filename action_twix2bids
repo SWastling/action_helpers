@@ -103,10 +103,6 @@ mrs_dp="${bids_session_dp}"/mrs
 msg "${GREEN}making directory \"${mrs_dp}\" ${NOFORMAT}"
 mkdir -p "${mrs_dp}"
 
-derivatives_dp="${bids_proj_dp}"/derivatives/osprey/sub-"${bids_subject}"/ses-"${bids_session}"/mrs
-msg "${GREEN}making directory \"${derivatives_dp}\" ${NOFORMAT}"
-mkdir -p "${derivatives_dp}"
-
 msg "${GREEN}converting the ${#twix_fps[@]} twix files found in \"${twix_dp}\" with spec2nii:${NOFORMAT}"
 for twix_fp in "${twix_fps[@]}"
 do
@@ -114,21 +110,30 @@ do
   twix_fn="${twix_fp##*/}"
   msg "${GREEN}* ${twix_fn} ${NOFORMAT}"
 
-  # remove file extension from filename
+  # remove the .dat file extension
   twix_fn_wo_ext="${twix_fn%.*}"
 
-  if [[ ${twix_fn_wo_ext} == *"unsuppressed" ]]; then
-    mrs_type="msref"
-    # remove the text after the final _ in filename i.e. the word unsuppressed
-    twix_fn_wo_ext_wo_unsuppressed="${twix_fn_wo_ext%_*}"
+  # parse the name of the voxel from the TWIX filename i.e. from meas_MIDXXXXX_FIDYYYYY_voxelname
+  # and set the suffix of the BIDS filename
+  if [[ ${twix_fn_wo_ext} == *"_unsuppressed" ]]; then
+    suffix="msref"
+    # remove the word _unsuppressed from the name
+    twix_fn_wo_ext_wo_unsuppressed="${twix_fn_wo_ext/_unsuppressed/}"
+
     #cut out the name of the VOI i.e. fields 5 to the end
     voi_name=$(echo "${twix_fn_wo_ext_wo_unsuppressed}" | cut -d "_" -f 5-)
   else
-    mrs_type="svs"
+    suffix="svs"
     #cut out the name of the VOI i.e. fields 5 to the end
     voi_name=$(echo "${twix_fn_wo_ext}" | cut -d "_" -f 5-)
   fi
 
-  out_fp="${mrs_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_voi-"${voi_name}"_"${mrs_type}"
+  # remove underscores from voi_name as they are not BIDS compliant
+  voi_name="${voi_name//_/}"
+
+  # create output filepath for .nii.gz and .json files
+  out_fp="${mrs_dp}"/sub-"${bids_subject}"_ses-"${bids_session}"_voi-"${voi_name}"_"${suffix}"
+
+  # run spec2nii
   spec2nii twix -j -f "${out_fp}" --anon -e image "${twix_fp}"
 done
