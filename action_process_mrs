@@ -166,7 +166,7 @@ outputFolder = '${voi_dp}';
 EOF
 
   msg "${GREEN}** running Osprey job file in MATLAB${NOFORMAT}"
-  matlab -nodesktop -nosplash -r "MRSCont = OspreyJob('${osprey_job_fp}'); MRSCont = OspreyLoad(MRSCont); MRSCont = OspreyProcess(MRSCont); MRSCont = OspreyFit(MRSCont); MRSCont = OspreyCoreg(MRSCont); MRSCont = OspreySeg(MRSCont); MRSCont = OspreyQuantify(MRSCont); exit"
+  matlab -nodesktop -nosplash -r "MRSCont = OspreyJob('${osprey_job_fp}'); MRSCont = OspreyLoad(MRSCont); MRSCont = OspreyProcess(MRSCont); MRSCont = OspreyFit(MRSCont); MRSCont = OspreyCoreg(MRSCont); MRSCont = OspreySeg(MRSCont); MRSCont = OspreyQuantify(MRSCont); MRSCont = OspreyHTMLReport(MRSCont, 1); exit"
 
 done
 
