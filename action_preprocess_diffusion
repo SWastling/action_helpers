@@ -289,7 +289,7 @@ dwi_PA_vols=$(mrinfo -size dwi_PA.mif | cut -d " " -f 4)
 mrconvert dwi_degibbs.mif -coord 3 0:$((dwi_PA_vols-1)) dwi_degibbs_PA.mif ${force_str}
 
 dwifslpreproc ${force_str} dwi_degibbs_PA.mif dwi_tu_eddy.mif -align_seepi -rpe_header -se_epi b0_degibbs_PA_AP.mif -eddyqc_all eddy_qc_results -nocleanup -eddy_options "--slm=linear --data_is_shelled --repol --cnr_maps"
-rm dwifslpreproc-tmp-*
+rm -r dwifslpreproc-tmp-*
 
 mrview -quiet -mode 2 -load dwi_degibbs.mif -interpolation 0 -load dwi_tu_eddy.mif -interpolation 0 &
 
